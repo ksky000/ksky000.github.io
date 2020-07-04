@@ -1,0 +1,671 @@
+---
+title:  "Google Promises"
+excerpt: "Google에서 개발하여 오픈한 Promises Framework에 대해 알아봅시다."
+
+categories:
+  - Swift
+tags:
+  - Swift
+  - Promise Pattern
+  - Google Promises
+last_modified_at: 2020-06-14T020:22:00
+---
+
+### Promises 소개
+
+---
+
+Promises는 비동기 코드 작성을 용이하게 하기 위해 Objective-C와 Swift에 대한 동기화 구성을 제공하는 프레임워크(Framework)이며 배포 사이트에 대한 링크는 다음과 같습니다.
+
+<https://github.com/google/promises>
+
+비동기 작업이 많은 코드에서는 어쩔 수 없이 콜백 또는 클로저를 많이 사용하게 되는데 비동기 작업이 매우 많은 경우 코드에 오류가 있을 때 디버깅이 매우 어려워지게 되고 코드가 지저분해져 유지보수도 힘들어지는 경우가 발생합니다.
+
+프라미스 패턴(Promise Pattern)은 위와 같이 비동기로 동작하는 로직을 쉽게 개발할 수 있도록 도와주고 코드의 가독성을 높여 이후 코드의 유지보수도 용이하게 할 수 있도록 하기 위해 고안된 패턴입니다.
+
+다음 소스를 보시죠.
+
+```swift
+// 인자로 전달받은 num1과 num2를 더해서 closure의 파라미터로 전달
+func add(num1: Int, num2: Int, closure: (Int) -> ()) {
+    let result = num1 + num2
+    closure(result)
+}
+
+// 인자로 전달된 num1의 제곱값을 closure의 파라미터로 전달
+func power(num1: Int, closure: (Int) ->()) {
+    let result = num1 * num1
+    closure(result)
+}
+
+// 인자로 전달된 num1에서 num2를 뺀값을 closure의 파라미터로 전달
+func sub(num1: Int, num2: Int, closure: (Int) -> ()) {
+    let result = num1 - num2
+    closure(result)
+}
+
+// 1과 1을 더한 값을 제곱한 결과에 2를 뺀 값을 출력
+add(num1: 1, num2: 1) { (result1) in
+    power(num1: result1) { (result2) in
+        sub(num1: result2, num2: 2) { (result3) in
+            print(result3)
+        }
+    }
+}
+```
+
+실제로 위 소스처럴 단순한 사칙 연산을 클로저까지 써서 개발할 일은 없겠지만 최대한 간단한 예를 들기 위해 위의 예를 들어봤습니다.
+
+자, 위 소스의 마지막 부분에 세개의 클로저가 중첩된 것이 보이시죠? 아주, 단순한 코드인데 딱 봤을 때 한번에 이해되지 않습니다.
+
+그리고, 코드가 실행될 때 코드의 실행 순서가 위에서 아래로 실행되는 것이 아니라 중첩된 콜백들 중 바깥쪽 콜백에서 안쪽 콜백 순으로 실행이 되어 코드의 실행 순서가 한눈에 보이지 않습니다.
+
+위의 소스를 Promises를 이용하여 개선한 다음 소스를 보시죠.
+
+```swift
+// 인자로 전달받은 num1과 num2를 더한 결과를 Promise 객체에 넣어서 반환
+func add(num1: Int, num2: Int) -> Promise<Int> {
+    let result = num1 + num2
+    return Promise<Int>(result)
+}
+
+// 인자로 전달된 num1의 제곱값을 Promise 객체에 넣어서 반환
+func power(num1: Int) -> Promise<Int> {
+    let result = num1 * num1
+    return Promise<Int>(result)
+}
+
+// 인자로 전달된 num1에서 num2를 뺀 값을 Promise에 넣어서 반환
+func sub(num1: Int, num2: Int) -> Promise<Int> {
+    let result = num1 - num2
+    return Promise<Int>(result)
+}
+
+// 1과 1을 더한 값을 제곱한 결과에 2를 뺀 값을 출력
+add(num1: 1, num2: 1)
+.then { result1 in // add 메서드를 호출한 결과가 result1으로 넘어옴
+    return power(result1)
+}
+.then { result2 in // power 메서드를 호출한 결과가 result2로 넘어옴
+    return sub(result, 2)
+}
+.then { result3 in // sub 메서드를 호출한 결과가 result3으로 넘어옴
+    print(result3)
+}
+```
+
+위 코드의 하단부를 보세요. 위 코드는 add 메서드를 호출한 결과가 result1으로 넘어오고 power 메서드를 호출한 결과가 result2로 넘어오고 sub메서드를 호출한 결과가 result3으로 넘어와서 최종적으로 result3을 출력하는 코드입니다.
+
+then에 대해서 설명은 따로 드리지 않았지만 위 설명만으로 저 코드가 이해되시지 않나요?
+
+좀더 알기 쉽게 위 내용을 그림으로 만들어 봤습니다.
+
+![Promise](/assets/posts/basic_promise.png)
+
+### Promise 상태
+
+---
+
+위 소스 내에 add, power, sub 메서드가 반환하고 있는 Promise라는 클래스가 보이시나요?
+
+본격적으로 Promise 객체에 대해 알아봅시다.
+
+일단, Promise는 다음의 3가지 상태 중 하나의 상태를 항상 가지고 있습니다.
+
+* pending: 아직 직업 수행 전인 상태
+* fulfilled: 직업을 수행했으며 수행에 대한 결과값을 가지고 있는 상태
+* rejected: 작업을 수행했으나 수행 중 에러가 발생한 상태
+
+자세히 알아볼까요?
+
+#### fulfill
+
+```swift
+// 1. Promise 객체 인스턴스 생성 (Promise의 상태는 pending 상태)
+let promise = Promise<String>(on: .main) { fulfill, reject in
+    // 2. Promise에게 "Hello World!!"라는 값을 넘겨주고 상태를 fulfill 상태로 만듬
+    fulfill("Hello World!!")
+}
+```
+
+위 코드는 Promise객체의 인스턴스를 생성하는 코드입니다.
+
+1번 주석의 내용과 같이 최초 Promise 객체의 인스턴스가 생성되면 Promise는 아직 아무런 작업도 하지 않은 상태인 pending 상태로 초기화 됩니다.
+
+객체의 인스턴스를 생성하면서 생성자의 파라미터로 .main과 익명의 클로저를 전달하고 있는 것이 보이시죠?
+
+.main의 의미는 클로저를 메인 쓰레드에서 동작시키겠다는 뜻입니다.
+
+위 코드를 실행하면 Promise 객체의 인스턴스가 생성되고 생성된 Promise 인스턴스는 파라미터로 전달받은 클로저를 메인 스레드 큐에 넣어 클로저 내부의 코드가 실행되도록 합니다.
+
+위 클로저 내부에서는 파라미터로 전달받은 fulfill 함수를 호출하고 있죠?
+
+fulfill 함수는 Promise 객체의 상태를 fulfilled 상태로 변경하고 fulfill 함수의 파라미터로 전달된 값을 Promise 내부에 저장하는 역할을 합니다.
+
+따라서, 위 코드를 샐행하면 Promise는 최종적으로 fulfilled 상태가 되고 내부에 "Hello World!!"라는 값을 저장하고 있게 됩니다.
+
+#### reject
+
+다른 예를 보겠습니다.
+
+```swift
+enum SomeError : Error {
+    case invalidNumber
+}
+
+// 1. Promise 객체 인스턴스 생성 (Promise의 상태는 pending 상태)
+let promise = Promise<String>(on: .main) { fulfill, reject in
+    // 2. Promise에게 에러를 넘기고 reject 상태로 만듬
+    reject(SomeError.invalidNumber)
+}
+```
+
+위 코드에서는 이전 코드와 동일하게 Promise 객체 인스턴스를 생성하고 .main과 익명의 클로저를 생성자의 파라미터로 넘기고 있습니다.
+
+Promise 객체 인스턴스가 상성 직후 Promise의 상태는 pending 상태이겠죠?
+
+또한, on 파라미터에 .main을 넘기고 있으니 파라미터로 전달된 클로저는 메신 스레드 상에서 실행이 될 것입니다.
+
+위 코드가 이전 코드와 다른 점이 보이시나요?
+
+바로, 클로저 내부에서 fulfill 함수 대신 reject 함수를 호출하고 있는 것을 확인 하셨나요?
+
+reject 함수는 Promise 객체의 상태를 reject 상태로 바꾸고 파라미터로 전달된 에러를 저장해 두는 역할을 합니다.
+
+따라서, 위 코드를 실행하면 최종적으로 Promise의 상태는 reject 상태가 되고 Promise 내부에 reject 함수의 파라미터로 전달된 에러를 저장하고 있게 될 것입니다.
+
+#### 중간 정리
+
+* Promise의 객체 인스턴스 생성 시 생성자의 파라미터는 클로저를 수행할 스레드 큐와 동작을 수행하는 익명 클로저입니다.
+* Promise의 객체 인스턴스 생성 직후에 Promise의 상태는 pending 상태입니다.
+* 클로저의 파라미터로 넘어온 함수 중 fulfill 함수를 호출하면 Promise의 상태는 fulfilled 상태가 됩니다.
+* 클로저의 파랄미터로 넘어온 함수 중 reject 함수를 호출하면 Promise의 상태는 rejected 상태가 됩니다.
+
+#### 좀 더 복잡한 예제로 알아볼까요
+
+이제 좀더 복잡한 샘플 코드를 가지고 더 알아보겠습니다.
+
+아래 코드는 1부터 1000만까지의 모든 수를 더한 합을 출력하기 위한 코드입니다.
+
+```swift
+    enum SomeError : Error {
+        case invalidNumber
+    }
+
+    let target = 10_000_000
+    // 1. Promise 객체 인스턴스 생성(인스턴스 생성 시 Promise의 상태는 pending 상태)
+    let promise = Promise<Int>(on: .global()) { fulfill, reject in
+        guard target >= 0 else {
+            // 2. Promise에 에러를 전달하고 Promise의 상태를 reject 상태로 만듬
+            reject(SomeError.invalidNumber)
+            return
+        }
+
+        var total = 0
+        for i in 1...target {
+            total += i
+        }
+        // 3. Promise에 결과를 전달하고 Promise의 상태를 fulfill 상태로 만듬
+        fulfill(total)
+    }
+}
+```
+
+자 위 코드도 앞의 코드들과 동일하게 Promise 객체 인스턴스를 생성하고 있습니다.
+
+단, 1에서부터 1000만까지의 수를 더할 때는 그냥 메인 쓰레드 상에서 수행할 수도 있겠지만 큰수를 일일히 루프를 돌면서 모든 수를 더하는 작업은 시간이 걸릴 수 있으므로 메인 스레드에서 수행시키기는 좀 부담스럽기 때문에 메인 스레드가 아닌 글로벌 스레드에서 수행되도록 했습니다. Promise 생성자의 첫번째 on에 넘기는 파라미터가 .main이 아닌 .global()인 것이 보이시죠?
+
+일단, 위 2번 주석을 보시면 target 변수의 값의 유효성 검사를 위해 0보다 크거나 같지 않으면 Promise의 상태를 reject 상태로 만들고 있음을 알 수 있습니다.
+
+그렇지 않으면 그 아래에서 1부터 target 변수에 저장된 값까지 루프를 돌면서 전체 수를 더한 후 그 결과값을 fulfill 함수 호출을 통해 Promise에 결과값을 전달하고 Promise의 상태를 fulfilled 상태로 만들어 주고 있습니다.
+
+#### Promise의 상태를 변경하는 다른 방법
+
+다음은, Promise의 상태를 변경할 수 있는 좀 더 간단한 방법을 알아보겠습니다.
+
+위의 코드들을 조금씩 변형해 보겠습니다.
+
+```swift
+// 1. Promise 객체 인스턴스 생성 (Promise의 상태는 pending 상태)
+let promise = Promise<String>(on: .main) { () -> String in
+    // 2. Promise에게 "Hello World!!"라는 값을 넘겨주고 상태를 fulfill 상태로 만듬
+    return "Hello World!!"
+}
+```
+
+위 코드는 클로저 fulfill, reject 파라미터가 생략되었고 바로 "Hello World!!"를 반환하고 있습니다. 위와 같이 해도 fulfill 함수를 호출한 것과 마찬가지로 Promise에게 "Hello World!!" 값을 넘겨주고 상태를 fulfill 상태로 변경할 수 있습니다.
+
+```swift
+// 1. Promise 객체 인스턴스 생성 (Promise의 상태는 pending 상태)
+let promise = Promise<String>(on: .main) { () -> String in
+    // 2. Promise에게 에러를 넘기고 reject 상태로 만듬
+    throw SomeError.invalidNumber
+}
+```
+
+위의 경우 fulfill, reject 파라미터를 생략하고 예외를 발생히키고 있습니다. 이 경우 Promise에 에러를 넘겨주고 Promise의 상태를 reject 상태로 변경시킬 수 있습니다.
+
+```swift
+enum SomeError : Error {
+    case invalidNumber
+}
+
+let target = 10_000_000
+// 1. Promise 객체 인스턴스 생성(인스턴스 생성 시 Promise의 상태는 pending 상태)
+let promise = Promise<Int>(on: .global()) { () -> Int in
+    guard target >= 0 else {
+        // 2. Promise에 에러를 전달하고 Promise의 상태를 reject 상태로 만듬
+        throw SomeError.invalidNumber
+    }
+
+    var total = 0
+    for i in 1...target {
+        total += i
+    }
+    // 3. Promise에 결과를 전달하고 Promise의 상태를 fulfill 상태로 만듬
+    return total
+}
+```
+
+위 코드는 앞서 예제로 보여드린 1부터 1000만까지 더하는 코드와 동일한 동작을 하는 코드입니다. 이 경우도 fulfill, reject 파라미터를 생략하고 에러인 경우 예외를 발생시키고 정상적으로 수행이 완료된 경우 결과값을 리턴하고 있습니다. 물론 fulfill, reject 파라미터를 이용하여 Promise에 값을 전달하고 상태를 변경하는 것과 동일한 결과를 가져오는 코드입니다.
+
+#### 기타
+
+Promise를 객체 인스턴스 생성 시 클로저를 파라미터로 전달해 바로 Promise의 상태를 변경하는 방법이 아닌 pending 상태로 유지하는 방법도 있습니다.
+
+1에서 1000만까지 더하는 코드를 이 방식으로 변형해 보겠습니다.
+
+```swift
+enum SomeError : Error {
+    case invalidNumber
+}
+
+let target = 10_000_000
+// 1. Promise 객체 인스턴스 생성(인스턴스 생성 시 Promise의 상태는 pending 상태)
+let promise = Promise<Int>.pending()
+
+guard target >= 0 else {
+    // 2. Promise에 에러를 전달하고 Promise의 상태를 reject 상태로 만듬
+    promise.reject(SomeError.invalidNumber)
+}
+
+var total = 0
+for i in 1...target {
+    total += i
+}
+// 3. Promise에 결과를 전달하고 Promise의 상태를 fulfilled 상태로 만듬
+fulfill(total)
+}
+```
+
+위의 코드와 같이 Promise 객체 인스턴스 생성 시 클로저를 생성자의 파라미터로 넘기지 않고 pending 상태로 우선 생성한 후 나중에 Promise의 상태를 변경하는 방법도 있습니다.
+
+단, 위의 경우는 많이 쓰이지는 않습니다. 실제 코코아 프레임워크에서 많이 쓰이는 델리게이트 패턴의 불편함을 해결하는 등의 용도로 사용이 가능한 방법으로 일단, 이런 방법이 있다 정도로 알아두시면 좋을 것 같습니다.
+
+### Promise 상태 감시
+
+---
+
+#### then
+
+Promise의 상태가 fulfilled로 변경되면 Promise는 then 오퍼레이터를 통해 전달된 클로저를 호출하며 파라미터로 저장된 결과값을 넘겨줍니다.
+
+위에 보여드렸던 코드를 다시 가져와 봅시다.
+
+```swift
+// 1. Promise 객체 인스턴스 생성 (Promise의 상태는 pending 상태)
+let promise = Promise<String>(on: .main) { () -> String in
+    // 2. Promise에게 "Hello World!!"라는 값을 넘겨주고 상태를 fulfill 상태로 만듬
+    return "Hello World!!"
+}
+```
+
+위 코드는 Promise의 상태를 fulfilled로 변경하고 Promise에 "Hello World!!"를 저장해 두는 코드입니다.
+
+여기에 then 오퍼레이터를 사용하여 Promise에 저장된 값을 가져와서 사용해 봅시다.
+
+```swift
+// 1. Promise 객체 인스턴스 생성 (Promise의 상태는 pending 상태)
+let promise = Promise<String>(on: .main) { () -> String in
+    // 2. Promise에게 "Hello World!!"라는 값을 넘겨주고 상태를 fulfill 상태로 만듬
+    return "Hello World!!"
+}
+
+// 3. promise가 fulfilled 상태일 때 promise에 저장된 문자열을 출력
+promise.then { str in
+    print(str)
+}
+
+```
+
+위 코드 중 1,2번 주석 부분은 이미 많이 설명해서 무슨 기능을 하고 있는지 잘 아실거라 믿습니다.
+
+코드의 3번 주석 부분 promise의 then 오퍼레이터에 Promise에 저장된 값을 가져와서 출력하는 클로저를 전달하고 있는 것이 보이시죠?
+
+Promise의 상태가 fulfilled 바뀌면 Promise는 then 오퍼레이터에 전달된 클로저를 호출해 줍니다.
+
+위 코드의 실행 결과는 예상하셨겠지만 다음과 같습니다.
+
+```text
+Hello World!!
+```
+
+위 코드에서는 Promise를 생성해서 promise라는 변수에 대입하고 promise 변수의 then 오퍼레이터를 호출했죠?
+
+위 코드를 변수를 쓰지 않고 다음과 같이 축약할 수 있겠죠?
+
+```swift
+Promise<String>(on: .main) { () -> String in
+    return "Hello World!!"
+}.then { str in
+    print(str)
+}
+```
+
+위 코드의 결과도 앞선 코드의 결과와 당연히 동일합니다.
+
+#### then 파이프라인(pipeline)
+
+이제 then 파이프라인을 구현해 보겠습니다.
+
+then 오퍼레이터는 파라미터로 전달받은 클로저에서 반환하는 값을 저장한 또다른 Promise 객체 인스턴스를 반환합니다.
+
+```swift
+// 1. 숫자 42라는 값을 저장한 Promise 객체 인스턴스 생성하여 numberPromise에 저장
+let numberPromise = Promise(42)
+
+// 2. numberPromise의 then 오퍼레이터에 숫자를 문자열로 반환하는 클로저를 전달
+// 이 때 chainedStringPromise에는 42가 문자열로 변환되어 저장된 Promise 객체 인스턴스가 저장됨
+let chainedStringPromise = numberPromise.then { number in
+  return String(number)
+}
+
+// 3. chainedStringPromise에 저장된 문자열 42를 출력
+chainedStringPromise.then { str in
+  print(str)
+}
+```
+
+위 코드가 이해 되시나요? 일단 1번 주석을 보시면 Promise 객체 인스턴스를 생성하는 방식이 좀 생소하죠?
+
+```swift
+// 숫자 42라는 값을 저장한 Promise 객체 인스턴스 생성하여 numberPromise에 저장
+let numberPromise = Promise(42)
+```
+
+위와 같이 Prmise 객체의 생성자 파라미터로 클로저를 넘기지 않고 바로 값을 넘길 수 있습니다.
+
+이 경우 Promise는 생성과 동시에 상태가 fulfilled가 되며 파라미터로 넘어온 값을 저장합니다.
+
+위의 코드 중 2번 주석 아래의 코드를 보죠.
+
+```swift
+// 2. numberPromise의 then 오퍼레이터에 숫자를 문자열로 반환하는 클로저를 전달
+// 이 때 chainedStringPromise에는 42가 문자열로 변환되어 저장된 Promise 객체 인스턴스가 저장됨
+let chainedStringPromise = numberPromise.then { number in
+  return String(number)
+}
+```
+
+then 오퍼레이터의 반환 값을 chaiedStringPromise에 저장하고 있죠?
+
+그렇다면 then 오퍼레이터의 반환값은 무엇일까요? 바로 then 오퍼레이터에 넘겨준 클로저를 파라미터로 받는 또다른 Promise가 반환됩니다.
+
+자 그럼 chainedStringPromise는 언제 fulfilled로 상태가 바뀔까요? then 오퍼레이터에 파라미터로 넘긴 클로저가 실행되고 난 뒤겠죠?
+
+then 오퍼레이터에 넘긴 클로저는 언제 실행된다고 했죠? 그 앞의 numberPromise가 fulfilled로 바뀌면 실행이 되겠죠?
+
+종합하면 먼저 numberPromise에 저장된 Promise에 42가 저장되고 상태가 fulfilled로 바뀌면 then 오퍼레이터에 넘긴 클로저가 실행이 되고 해당 클로저에서 문자열 "42"를 반환하게 되면 chainedStringPromise가 fulfilled로 바뀌고 문자열 "42"를 저장하게 되겠죠.
+
+그 후, 3번 주석 아래의 chainedStringPromise 객체에 then 오퍼레이터가 호출되고 있으므로 최종 42라는 문자열이 출력되게 될 것입니다.
+
+위 코드를 변수를 쓰지 않고 축약해 보면 다음과 같은 코드가 됩니다.
+
+```swift
+Promise(42).then { number in
+    return String(number)
+}.then { str in
+    print(str)
+}
+```
+
+좀 더 긴 코드를 봅시다.
+
+```swift
+// 1
+let H = Promise("H")
+// 2
+let e = H.then { str in
+    return "\(str)e"
+}
+// 3
+let l1 = e.then { str in
+    return Promise("\(str)l")
+}
+// 4
+let l2 = l1.then { str -> Promise<String> in
+    return Promise<String>(on: .main) { fulfill, reject in
+        fulfill ("\(str)l")
+    }
+}
+// 5
+let o = l2.then { str -> Promise<String> in
+    return Promise<String>(on: .global()) { () -> String in
+        return ("\(str)o")
+    }
+}
+// 6
+o.then { str in
+    print(str)
+}
+```
+
+코드 실행 결과
+
+```text
+Hello
+```
+
+주석 1번 아래 코드는 아시는 바와 같이 Promise 객체 인스턴스를 생성 후 "H"라는 문자를 저장하고 상태를 fulfilled로 변경한 후 변수 H에 저장하는 코드입니다.
+
+주석 2번 코드는 H에 저장된 Promise 객체 인스턴스에 then 오퍼레이터를 호출하며 파라미터로 값을 반환하는 클로저를 넘겼습니다. 그리고, 변수 e에는 then이 반환하는 새로운 Promise 객체 인스턴스가 저장될 것입니다.
+
+나머지 주석 3, 4, 5, 6번도 동일하게 then 오퍼레이터를 호출하고 있으며 반환되는 Promise 객체를 각각의 변수에 저장하고 있죠.
+
+그런데, 자세히 보시면 각각의 then에 넘기는 클로저에서 반환하는 값이 일반 값인 경우도 있고 Promise 객체 인스턴스를 생성하여 반환하는 경우도 있는 것이 보이시죠?
+
+3번 코드를 다시 봅시다.
+
+```swift
+// 3
+let l1 = e.then { str in
+    return Promise("\(str)l")
+}
+```
+
+then 오퍼레이터에 넘기는 클로저에서 Promise 객체 인스턴스를 생성하여 반환하도록 되어 있죠?
+
+then 오퍼레이터에 넘기는 클로저에서 Promise 객체 인스턴스를 반환하도록 하면 나중에 클로저 내에서 생성된 Promise에 저장된 값과 상태가 l1에 그대로 반영됩니다.
+
+즉 위 클로저가 실행되면 파라미터 str에는 "He"가 저장되어 넘어올 것이고 클로저 내에서 반환하는 Promise는 "Hel"이 저장된 fulfilled 상태의 Promise가 될 것입니다.
+
+그리고, l1에 저장된 Promise에도 동일하게 "Hel"이 저장되고 fulfilled 상태가 될 것입니다.
+
+마지막으로 위 코드를 축약해 보겠습니다.
+
+```swift
+Promise("H").then { str in
+    return "\(str)e"
+}.then { str in
+    return Promise("\(str)l")
+}.then { str -> Promise<String> in
+    return Promise<String>(on: .main) { fulfill, reject in
+        fulfill ("\(str)l")
+    }
+}.then { str -> Promise<String> in
+    return Promise<String>(on: .global()) { () -> String in
+        return ("\(str)o")
+    }
+}.then { str in
+    print(str)
+}
+```
+
+#### catch
+
+위에서 Promise의 상태가 fulfilled 상태가 되면 then 오퍼레이터에 전달된 클로저가 실행된다고 했습니다.
+
+반면에, Promise의 상태가 rejected 상태가 되면 catch 오퍼레이터에 전달된 클로저가 실행이 됩니다.
+
+다음 코드를 보시죠.
+
+```swift
+enum SomeError : Error {
+    case invalidNumber
+}
+
+// 1. Promise 객체 인스턴스 생성 (Promise의 상태는 pending 상태)
+let promise = Promise<String>(on: .main) { fulfill, reject in
+    // 2. Promise에게 에러를 넘기고 reject 상태로 만듬
+    reject(SomeError.invalidNumber)
+}
+
+promise.catch { error in
+    print(error)
+}
+```
+
+코드 실행 결과
+
+```text
+invalidNumber
+```
+
+1번 주석 아래를 보시면 Promise 객체 인스턴스를 생성 후 rejected 상태로 만들고 있습니다.
+
+그 다음 catch 오퍼레이터를 호출하며 파라미터로 클로저를 전달하고 있습니다.
+
+위와 같이 Promise의 상태가 rejected 상태가 되면 catch 오퍼레이터에 전달된 클로저가 실행됩니다.
+
+#### catch 파이프라인(pipeline)
+
+자 앞에서 예를 들었던 1부터 1000만까지 더하는 코드를 다시 가져와 보겠습니다.
+
+```swift
+enum SomeError : Error {
+    case invalidNumber
+}
+
+let target = 10_000_000
+// 1. Promise 객체 인스턴스 생성(인스턴스 생성 시 Promise의 상태는 pending 상태)
+let promise = Promise<Int>(on: .global()) { () -> Int in
+    guard target >= 0 else {
+        // 2. Promise에 에러를 전달하고 Promise의 상태를 reject 상태로 만듬
+        throw SomeError.invalidNumber
+    }
+
+    var total = 0
+    for i in 1...target {
+        total += i
+    }
+    // 3. Promise에 결과를 전달하고 Promise의 상태를 fulfill 상태로 만듬
+    return total
+}
+// 4. promise의 then 오퍼레이터 호출
+promise.then { result in
+    print(result)
+}
+// 5. promise의 catch 오퍼레이터 호출
+promise.catch { error in
+    print(error)
+}
+```
+
+위 코드를 실행하면 1부터 1000만까지 더하는 작업이 정상적으로 진행되고 promise의 상태가 fulfilled로 변경되며 then 오퍼레이터에 전달된 클로저가 실행되어 그 결과인 50000005000000이라는 숫자가 출력될 것입니다.
+
+위 코드에서 target 변수를 정의하는 부분의 코드를 다음과 같이 바꿔봅시다.
+
+```swift
+let target = -100
+```
+
+그러면, 2번 주석 아래의 코드가 실행되며 Promise의 상태는 rejected 상태가 되고 catch 오퍼레이터에 전달한 클로저가 실행되어 "invalidNumber"가 출력될 것입니다.
+
+다음의 코드는 위 코드를 축약한 것입니다.
+
+```swift
+enum SomeError : Error {
+    case invalidNumber
+}
+
+let target = 10_000_000
+Promise<Int>(on: .global()) { () -> Int in
+    guard target >= 0 else {
+        throw SomeError.invalidNumber
+    }
+
+    var total = 0
+    for i in 1...target {
+        total += i
+    }
+    return total
+}.then { result in
+    print(result)
+}.catch { error in
+    print(error)
+}
+```
+
+위 코드에 조금만 더 추가해 볼까요?
+
+```swift
+enum SomeError : Error {
+    case invalidNumber
+}
+
+let target = 10_000_000
+Promise<Int>(on: .global()) { () -> Int in
+    guard target >= 0 else {
+        throw SomeError.invalidNumber
+    }
+
+    var total = 0
+    for i in 1...target {
+        total += i
+    }
+    return total
+}.then { result -> Bool in
+    // 1. result가 1000보다 크면 true 아니면 false 반환
+    if result > 1000 {
+        return true
+    } else {
+        return false
+    }
+}.then { result in
+    // 2. result 출력
+    print(result)
+}.catch { error in
+    print(error)
+}
+```
+
+위 코드의 실행 결과가 어떻게 될까요?
+
+1번 주석의 result에는 1부터 1000만까지 더한 값이 전달될 것이고 그 값은 당연히 1000보다 크므로 2번 주석 부분의 result에는 true가 전달되어 최종 true가 출력될 것입니다.
+
+위의 target 변수의 값을 -100으로 초기화하면 어떻게 될까요?
+
+```swift
+let target = -100
+```
+
+예상하시겠지만 then 오퍼레이터들에 전달된 클로저들은 호출되지 않고 마지막 catch에 전달된 클로저가 호출이 되어 최종 "invalidNumber"가 출력될 것입니다.
+
+설명하다보니 무지 길어졌네요.
+
+Goolgle promises의 가장 기본적인 내용에 대한 설명이 끝났습니다.
+
+Google promises에는 위에 설명한 오퍼레이터들 외에 다양한 오퍼레이터를 제공하고 있습니다.
+
+이 글은 이만 마무리하고 나머지 오퍼레이터들은 다른 포스트에서 설명하도록 할게요.
+
